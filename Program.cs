@@ -10,19 +10,22 @@ namespace ImageHelper
 {
     class Program
     {
-        static readonly string Root = @"D:\Users\Aku\Pictures\Test";
-        static readonly string Output = @"D:\Users\Aku\Pictures\TestSort";
+        static readonly string Root = @"D:\Users\Aku\Pictures\1";
+        static readonly string Output = @"D:\Users\Aku\Pictures\1Sort";
 
         #region Option
 
         static readonly List<string> exps = new List<string>
         {
             ".jpg",
+            ".JPG",
             ".jpeg",
-            ".png"
+            ".JPEG",
+            ".png",
+            ".PNG"
         };
 
-        static readonly Dictionary<string, Func<Size, bool>> sizeGroup = new Dictionary<string, Func<Size, bool>>
+        static readonly Dictionary<string, Func<Size, bool>> MainGroup = new Dictionary<string, Func<Size, bool>>
         {
             ["Vertical"] = s =>
             {
@@ -39,15 +42,15 @@ namespace ImageHelper
             }
         };
 
-        static readonly Dictionary<string, Func<Size, bool>> sizeSubGroup = new Dictionary<string, Func<Size, bool>>
+        static readonly Dictionary<string, Func<Size, bool>> SubGroup = new Dictionary<string, Func<Size, bool>>
         {
             ["Low"] = s =>
             {
-                return !sizeSubGroup["Middle"].Invoke(s);
+                return s.Width < 600 && s.Height < 600;
             },
             ["Middle"] = s =>
             {
-                return !sizeSubGroup["High"].Invoke(s)
+                return !SubGroup["High"].Invoke(s)
                     ? s.Width >= 600 && s.Height >= 600
                     : false;
             },
@@ -61,6 +64,8 @@ namespace ImageHelper
 
         static void Main(string[] args)
         {
+            DateTime start = DateTime.Now;
+
             List<string> images = GetAllImage(Root);
             Log($"Find {images.Count} image");
 
@@ -72,6 +77,11 @@ namespace ImageHelper
                 DeleteDuplicate(Output);
                 Log($"Complite", ConsoleColor.Green);
             }
+
+            TimeSpan date = DateTime.Now - start;
+            string dateStr = $"{date.Hours}:{date.Minutes}:{date.Seconds}";
+            Log($"Time: {dateStr}");
+
             Console.ReadKey();
         }
 
@@ -133,7 +143,7 @@ namespace ImageHelper
             Log($"Start sort image by size");
             Dictionary<string, List<Img>> group = new Dictionary<string, List<Img>>();
 
-            foreach (string key in sizeGroup.Keys)
+            foreach (string key in MainGroup.Keys)
             {
                 List<Img> images = new List<Img>();
 
@@ -142,7 +152,7 @@ namespace ImageHelper
                     try
                     {
                         Img image = new Img(path);
-                        if (sizeGroup[key].Invoke(image.Size))
+                        if (MainGroup[key].Invoke(image.Size))
                             images.Add(image);
                     }
                     catch (Exception e)
@@ -170,14 +180,14 @@ namespace ImageHelper
             Dictionary<string, List<string>> result = new Dictionary<string, List<string>>();
             foreach (string key in group.Keys)
             {
-                foreach (string subKey in sizeSubGroup.Keys)
+                foreach (string subKey in SubGroup.Keys)
                 {
                     string newKey = $@"{key}\{subKey}";
                     List<Img> images = new List<Img>();
 
                     foreach (Img img in group[key])
                     {
-                        if (sizeSubGroup[subKey].Invoke(img.Size))
+                        if (SubGroup[subKey].Invoke(img.Size))
                             images.Add(img);
                     }
 
