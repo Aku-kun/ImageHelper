@@ -10,10 +10,12 @@ namespace ImageHelper
 {
     class Program
     {
-        static readonly string Root = @"D:\Users\Aku\Pictures\1";
-        static readonly string Output = @"D:\Users\Aku\Pictures\1Sort";
+        static readonly string Root = @"D:\Users\Aku\Pictures\Mobail";
+        static readonly string Output = @"D:\Users\Aku\Pictures\MobailSort";
 
         #region Option
+
+        static readonly int MaxColorDifference = 25;
 
         static readonly List<string> exps = new List<string>
         {
@@ -112,7 +114,7 @@ namespace ImageHelper
                                 int h = (int)Math.Round(bmp.GetPixel(x, y).GetHue());
 
                                 bool added = false;
-                                for (int i = 0; i < 10; i++)
+                                for (int i = 0; i < MaxColorDifference; i++)
                                 {
                                     if (list.ContainsKey(h + i))
                                     {
@@ -140,6 +142,22 @@ namespace ImageHelper
 
         static Dictionary<string, List<string>> SortImage(List<string> root)
         {
+            Log($"Start load image info");
+            List<Img> imagesInfo = new List<Img>();
+
+            foreach (string path in root)
+            {
+                try
+                {
+                    imagesInfo.Add(new Img(path));
+                }
+                catch (Exception e)
+                {
+                    Error($"Load image {path}", e);
+                }
+            }
+            root = null;
+
             Log($"Start sort image by size");
             Dictionary<string, List<Img>> group = new Dictionary<string, List<Img>>();
 
@@ -147,22 +165,14 @@ namespace ImageHelper
             {
                 List<Img> images = new List<Img>();
 
-                foreach (string path in root)
+                foreach (Img image in imagesInfo)
                 {
-                    try
-                    {
-                        Img image = new Img(path);
-                        if (MainGroup[key].Invoke(image.Size))
-                            images.Add(image);
-                    }
-                    catch (Exception e)
-                    {
-                        Error($"Load image {path}", e);
-                    }
+                    if (MainGroup[key].Invoke(image.Size))
+                        images.Add(image);
                 }
 
                 foreach (Img img in images)
-                    root.Remove(img.Path);
+                    imagesInfo.Remove(img);
 
                 Log($"Group {key} contains {images.Count} image", images.Count == 0 ? (ConsoleColor?)null : ConsoleColor.Green);
 
@@ -172,8 +182,8 @@ namespace ImageHelper
                     group.Add(key, images);
             }
 
-            if (root.Count != 0)
-                Error($"Any image can't sort {root.Count}");
+            if (imagesInfo.Count != 0)
+                Error($"Any image can't sort {imagesInfo.Count}");
 
 
             Log($"Start sort image by size & color in group");
@@ -238,6 +248,8 @@ namespace ImageHelper
 
         static void DeleteDuplicate(string root)
         {
+            Log($"Start search duplicate image in {root}");
+
             foreach (string path in Directory.GetDirectories(root))
                 DeleteDuplicate(path);
 
