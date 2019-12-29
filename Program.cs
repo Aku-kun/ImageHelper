@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Drawing.Imaging;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
@@ -15,7 +16,9 @@ namespace ImageHelper
 
         #region Option
 
-        static readonly int MaxColorDifference = 20;
+        static readonly int MaxColorDifference = 10;
+        static readonly int BlurSize = 2;
+        static readonly int MinSize = 6;
 
         static readonly List<string> exps = new List<string>
         {
@@ -88,11 +91,103 @@ namespace ImageHelper
 
         #region Sort
 
+        interface IBitmap : IDisposable
+        {
+            int Width { get; }
+            int Height { get; }
+            int ToARGB(int x, int y);
+        }
+
+        class MyBitmap : IBitmap
+        {
+            Bitmap bitmap;
+
+            public MyBitmap(Bitmap bitmap) => this.bitmap = new Bitmap(bitmap);
+
+            public int Width => bitmap.Width;
+            public int Height => bitmap.Height;
+
+            public int ToARGB(int x, int y)
+            {
+                Color color = bitmap.GetPixel(x, y);
+                return (255 << 24) | (color.R << 16) | (color.G << 8) | color.B;
+            }
+
+            public void Dispose() => bitmap.Dispose();
+        }
+
+        unsafe class UnsafeBitmap : IBitmap
+        {
+            Bitmap bitmap;
+
+            int width;
+            BitmapData bitmapData = null;
+            Byte* pBase = null;
+
+            public UnsafeBitmap(Bitmap bitmap) 
+                => this.bitmap = new Bitmap(bitmap);
+
+            public int Width => bitmap.Width;
+            public int Height => bitmap.Height;
+
+            public void LockBitmap()
+            {
+                GraphicsUnit unit = GraphicsUnit.Pixel;
+                RectangleF boundsF = bitmap.GetBounds(ref unit);
+                Rectangle bounds = new Rectangle((int)boundsF.X,
+                (int)boundsF.Y,
+                (int)boundsF.Width,
+                (int)boundsF.Height);
+
+                width = (int)boundsF.Width * sizeof(PixelData);
+                if (width % 4 != 0)
+                {
+                    width = 4 * (width / 4 + 1);
+                }
+                bitmapData = bitmap.LockBits(bounds, ImageLockMode.ReadWrite, PixelFormat.Format24bppRgb);
+
+                pBase = (Byte*)bitmapData.Scan0.ToPointer();
+            }
+
+            public int ToARGB(int x, int y)
+                => GetPixel(x, y).ToARGB();
+
+            public PixelData GetPixel(int x, int y)
+            {
+                PixelData returnValue = *PixelAt(x, y);
+                return returnValue;
+            }
+
+            public void UnlockBitmap()
+            {
+                bitmap.UnlockBits(bitmapData);
+                bitmapData = null;
+                pBase = null;
+            }
+
+            public PixelData* PixelAt(int x, int y) 
+                => (PixelData*)(pBase + y * width + x * sizeof(PixelData));
+
+
+            public void Dispose()
+                => bitmap.Dispose();
+        }
+
+        struct PixelData
+        {
+            public byte blue;
+            public byte green;
+            public byte red;
+
+            public int ToARGB()
+                => (255 << 24) | (red << 16) | (green << 8) | blue;
+        }
+
         struct Img
         {
             public string Path;
             public Size Size;
-            public float Color;
+            public int Color;
 
             public Img(string path)
             {
@@ -100,44 +195,82 @@ namespace ImageHelper
                 Log($"Start process image {name}", ConsoleColor.DarkGray);
 
                 Path = path;
+
+                string unSafe = "[unsafe method]";
                 using (Image img = Image.FromFile(path))
                 {
                     Size = img.Size;
-                    using (Bitmap bmp = new Bitmap(img, new Size(img.Width / 4, img.Height / 4)))
+
+                    int size = MinSize + BlurSize * 2;
+                    if (img.Width < size || img.Height < size)
+                        throw new Exception($"Image must be > {size}x{size}");
+
+                    using (Bitmap bmpR = new Bitmap(img, new Size(img.Width / MinSize, img.Height / MinSize)))
                     {
-                        Dictionary<int, int> list = new Dictionary<int, int>();
-
-                        for (int x = 0; x < bmp.Width; x++)
-                            for (int y = 0; y < bmp.Height; y++)
+                        try
+                        {
+                            using (UnsafeBitmap bmp = new UnsafeBitmap(bmpR))
                             {
-                                int h = bmp.GetPixel(x, y).ToArgb();
-
-                                bool added = false;
-                                for (int i = 0; i < MaxColorDifference; i++)
-                                {
-                                    if (list.ContainsKey(h + i))
-                                    {
-                                        list[h + i]++;
-                                        added = true;
-                                        break;
-                                    }
-                                    if (list.ContainsKey(h - i))
-                                    {
-                                        list[h - i]++;
-                                        added = true;
-                                        break;
-                                    }
-                                }
-                                if (!added)
-                                    list.Add(h, 1);
-
+                                bmp.LockBitmap();
+                                Color = GetColor(bmp);
+                                bmp.UnlockBitmap();
                             }
-
-                        Color = list.First(x => x.Value == list.Values.Max()).Key;
+                        }
+                        catch
+                        {
+                            unSafe = "[safe method]";
+                            using (MyBitmap bmp = new MyBitmap(bmpR))
+                            {
+                                Color = GetColor(bmp);
+                            }
+                        }
                     }
                 }
 
-                Log($"End process image {name} [Size: {Size.Width}x{Size.Height} | Color: {Color}]", ConsoleColor.DarkGray);
+                Color color = System.Drawing.Color.FromArgb(Color);
+                Log($"End {unSafe} process image {name} | Size [{Size.Width}x{Size.Height}] | {color}", ConsoleColor.DarkGray);
+            }
+
+            static int GetColor(IBitmap bmp)
+            {
+                Dictionary<int, int> list = new Dictionary<int, int>();
+
+                int bluerMatrix = (BlurSize * 2) * (BlurSize * 2);
+                for (int x = BlurSize; x < bmp.Width - BlurSize; x++)
+                    for (int y = BlurSize; y < bmp.Height - BlurSize; y++)
+                    {
+                        int rgb = 0;
+                        for (int i = x - BlurSize; i < x + BlurSize; i++)
+                            for (int j = y - BlurSize; j < y + BlurSize; j++)
+                                rgb += bmp.ToARGB(x, y);
+
+                        rgb /= bluerMatrix;
+
+                        if (rgb > -15000000 && rgb < -8000000)
+                        {
+                            bool added = false;
+                            for (int i = 0; i <= MaxColorDifference; i++)
+                            {
+                                if (list.ContainsKey(rgb + i))
+                                {
+                                    list[rgb + i] += 1;
+                                    added = true;
+                                    break;
+                                }
+                                if (list.ContainsKey(rgb - i))
+                                {
+                                    list[rgb - i] += 1;
+                                    added = true;
+                                    break;
+                                }
+                            }
+                            if (added == false)
+                                list.Add(rgb, 1);
+                        }
+                    }
+
+                int maxV = list.Values.Max();
+                return list.First(l => l.Value == maxV).Key;
             }
         }
 
