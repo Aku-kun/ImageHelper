@@ -15,7 +15,7 @@ namespace ImageHelper
 
         #region Option
 
-        static readonly int MaxColorDifference = 15;
+        static readonly int MaxColorDifference = 20;
 
         static readonly List<string> exps = new List<string>
         {
@@ -48,7 +48,7 @@ namespace ImageHelper
         {
             ["Low"] = s =>
             {
-                return s.Width < 600 && s.Height < 600;
+                return !SubGroup["High"].Invoke(s) && !SubGroup["Middle"].Invoke(s);
             },
             ["Middle"] = s =>
             {
@@ -75,9 +75,8 @@ namespace ImageHelper
                 Error("No image");
             else
             {
-                SaveImage(SortImage(images), Output);
-                DeleteDuplicate(Output);
-                Log($"Complite", ConsoleColor.Green);
+                Dictionary<string, List<string>> result = DeleteDuplicate(SortImage(images));
+                SaveImage(result, Output);
             }
 
             TimeSpan date = DateTime.Now - start;
@@ -97,13 +96,13 @@ namespace ImageHelper
 
             public Img(string path)
             {
+                string name = path.Substring(path.LastIndexOf('\\') + 1);
+                Log($"Start process image {name}", ConsoleColor.DarkGray);
+
                 Path = path;
                 using (Image img = Image.FromFile(path))
                 {
                     Size = img.Size;
-
-                    Log($"Process image {path.Substring(path.LastIndexOf('\\') + 1)}", ConsoleColor.DarkGray);
-
                     using (Bitmap bmp = new Bitmap(img, new Size(img.Width / 4, img.Height / 4)))
                     {
                         Dictionary<int, int> list = new Dictionary<int, int>();
@@ -137,6 +136,8 @@ namespace ImageHelper
                         Color = list.First(x => x.Value == list.Values.Max()).Key;
                     }
                 }
+
+                Log($"End process image {name} [Size: {Size.Width}x{Size.Height} | Color: {Color}]", ConsoleColor.DarkGray);
             }
         }
 
@@ -174,16 +175,17 @@ namespace ImageHelper
                 foreach (Img img in images)
                     imagesInfo.Remove(img);
 
-                Log($"Group {key} contains {images.Count} image", images.Count == 0 ? (ConsoleColor?)null : ConsoleColor.Green);
-
                 if (images.Count == 0)
                     Log($"No image in group {key}", ConsoleColor.Yellow);
                 else
+                {
+                    Log($"Group {key} contains {images.Count} image", ConsoleColor.Green);
                     group.Add(key, images);
+                }
             }
 
             if (imagesInfo.Count != 0)
-                Error($"Any image can't sort {imagesInfo.Count}");
+                Error($"{imagesInfo.Count} image can't sort");
 
 
             Log($"Start sort image by size & color in group");
@@ -204,14 +206,17 @@ namespace ImageHelper
                     foreach (Img img in images)
                         group[key].Remove(img);
 
-
-                    Log($"Group {newKey} contains {images.Count} image", images.Count == 0 ? (ConsoleColor?)null : ConsoleColor.Green);
-
                     if (images.Count == 0)
                         Log($"No image in group {newKey}", ConsoleColor.Yellow);
                     else
+                    {
+                        Log($"Group {newKey} contains {images.Count} image", ConsoleColor.Green);
                         result.Add(newKey, images.OrderBy(i => i.Color).Select(img => img.Path).ToList());
+                    }
                 }
+
+                if (group[key].Count != 0)
+                    Error($"{group[key].Count} image can't sort in group {key}");
             }
 
             return result;
@@ -246,44 +251,37 @@ namespace ImageHelper
             }
         }
 
-        static void DeleteDuplicate(string root)
+        static Dictionary<string, List<string>> DeleteDuplicate(Dictionary<string, List<string>> images)
         {
-            Log($"Start search duplicate image in {root}");
-
-            foreach (string path in Directory.GetDirectories(root))
-                DeleteDuplicate(path);
-
-            List<string> duplicates = Directory.GetFiles(root).Select(f => new
+            foreach (string key in images.Keys)
             {
-                FileName = f,
-                FileHash = GetHash(f)
-            }).GroupBy(f => f.FileHash)
+                Log($"Start search duplicate image in group {key}");
+
+                List<string> duplicates = images[key].Select(f => new
+                {
+                    FileName = f,
+                    FileHash = GetHash(f)
+                }).GroupBy(f => f.FileHash)
                 .Select(g => new { FileHash = g.Key, Files = g.Select(z => z.FileName).ToList() })
                 .SelectMany(f => f.Files.Skip(1))
                 .ToList();
 
-            if (duplicates.Count > 0)
-            {
-                Log($"Find {duplicates.Count} duplicate image in folder {root}", ConsoleColor.Yellow);
-                foreach (string path in duplicates)
+                if (duplicates.Count > 0)
                 {
-                    try
-                    {
-                        File.Delete(path);
-                    }
-                    catch (Exception e)
-                    {
-                        Error($"Delete duplicate image {path}", e);
-                    }
-                }
+                    Log($"Find {duplicates.Count} duplicate image in group {key}", ConsoleColor.Yellow);
+                    foreach (string path in duplicates)
+                        images[key].Remove(path);
 
-                Log($"Delete all duplicate image in folder {root}", ConsoleColor.Green);
+                    Log($"Delete all duplicate image in group {key}", ConsoleColor.Green);
+                }
             }
+
+            Log($"Delete all duplicate", ConsoleColor.Green);
+            return images;
         }
 
         static void SaveImage(Dictionary<string, List<string>> images, string path)
         {
-            Log($"Start save image");
             foreach (string key in images.Keys)
             {
                 Log($"Start save image in group {key}");
@@ -305,8 +303,14 @@ namespace ImageHelper
                         Error($"Copy image {image}", e);
                     }
                 }
+
+                if (count == images[key].Count)
+                    Log($"Save all image in group {key}", ConsoleColor.Green);
+                else
+                    Log($"Save {count}/{images[key].Count} image in group {key}", ConsoleColor.Yellow);
             }
-            Log($"Complite save image", ConsoleColor.Green);
+
+            Log($"Save all image", ConsoleColor.Green);
         }
 
         #endregion
