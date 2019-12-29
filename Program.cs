@@ -10,12 +10,12 @@ namespace ImageHelper
 {
     class Program
     {
-        static readonly string Root = @"D:\Users\Aku\Pictures\Mobail";
-        static readonly string Output = @"D:\Users\Aku\Pictures\MobailSort";
+        static readonly string Root = @"D:\Users\Aku\Pictures";
+        static readonly string Output = @"D:\Users\Aku\Pictures\PicturesSort";
 
         #region Option
 
-        static readonly int MaxColorDifference = 25;
+        static readonly int MaxColorDifference = 15;
 
         static readonly List<string> exps = new List<string>
         {
@@ -111,7 +111,7 @@ namespace ImageHelper
                         for (int x = 0; x < bmp.Width; x++)
                             for (int y = 0; y < bmp.Height; y++)
                             {
-                                int h = (int)Math.Round(bmp.GetPixel(x, y).GetHue());
+                                int h = bmp.GetPixel(x, y).ToArgb();
 
                                 bool added = false;
                                 for (int i = 0; i < MaxColorDifference; i++)
